@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+  <title>리코셰 로봇 온라인</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <!-- 입장 화면 -->
+  <section id="joinScreen">
+    <div class="join-card">
+      <h1>🤖 리코셰 로봇</h1>
+      <p class="sub">클래식 에디션 · 최대 30명 동시 플레이</p>
+      <label>닉네임
+        <input id="nameInput" maxlength="12" placeholder="예: 홍길동" autocomplete="off" />
+      </label>
+      <label>방 코드 <small>(같은 코드를 입력한 사람끼리 함께 플레이)</small>
+        <input id="roomInput" maxlength="12" placeholder="LOBBY" autocomplete="off" />
+      </label>
+      <button id="joinBtn" class="primary big">입장하기</button>
+      <p id="joinError" class="error"></p>
+      <details class="rules">
+        <summary>게임 방법</summary>
+        <ul>
+          <li>로봇은 <b>직선으로만</b> 움직이고, <b>벽이나 다른 로봇에 부딪힐 때까지 멈추지 않습니다.</b></li>
+          <li>매 라운드 목표 칩이 공개되면, 같은 색 로봇을 그 칸에 <b>정확히 멈추게</b> 하세요. (소용돌이 칩은 아무 로봇이나 OK)</li>
+          <li>다른 색 로봇을 먼저 옮겨 "벽" 역할을 시켜도 되며, 모든 로봇 이동이 1수로 계산됩니다.</li>
+          <li>누군가 처음 해답을 제출하면 카운트다운이 시작됩니다. 시간 안에 <b>가장 적은 수</b>로 푼 사람이 칩을 가져갑니다. (동점이면 먼저 낸 사람)</li>
+          <li>우승자의 해답대로 로봇이 이동한 상태로 다음 라운드가 이어집니다. 칩 17개가 모두 끝나면 게임 종료!</li>
+        </ul>
+        <p class="keys">⌨️ 로봇 선택: 클릭 / 1~4 / Tab · 이동: 방향키·WASD / 화살표 표시 클릭 · 되돌리기: Z · 처음으로: Esc<br />📱 모바일: 로봇을 터치한 채 원하는 방향으로 스와이프</p>
+      </details>
+    </div>
+  </section>
+
+  <!-- 게임 화면 -->
+  <section id="gameScreen" class="hidden">
+    <header class="topbar">
+      <div class="brand">🤖 리코셰 로봇</div>
+      <div class="pill" id="roomPill">방: -</div>
+      <div class="pill" id="playerPill">👥 0/30</div>
+      <div class="pill" id="roundPill">라운드 -</div>
+      <div class="pill conn" id="connPill">● 연결됨</div>
+    </header>
+
+    <main class="layout">
+      <div class="board-col">
+        <div id="statusBar" class="status-bar">대기 중…</div>
+        <div class="board-wrap">
+          <div id="board" class="board"></div>
+          <div id="banner" class="banner hidden"></div>
+        </div>
+        <div class="controls">
+          <div class="robot-btns" id="robotBtns"></div>
+          <div class="dpad">
+            <button data-dir="up" class="d-up">↑</button>
+            <button data-dir="left" class="d-left">←</button>
+            <button data-dir="down" class="d-down">↓</button>
+            <button data-dir="right" class="d-right">→</button>
+          </div>
+          <div class="action-btns">
+            <button id="undoBtn">↶ 되돌리기</button>
+            <button id="resetBtn">⟲ 처음으로</button>
+          </div>
+        </div>
+        <div class="move-info" id="moveInfo"></div>
+      </div>
+
+      <aside class="side-col">
+        <div class="panel target-panel">
+          <div class="target-big" id="targetBig"></div>
+          <div class="target-text">
+            <div class="label">현재 목표</div>
+            <div id="targetName" class="target-name">-</div>
+            <div id="timer" class="timer"></div>
+          </div>
+        </div>
+
+        <div class="panel hidden" id="resultPanel"></div>
+
+        <div class="panel hidden" id="hostPanel">
+          <h3>👑 호스트 메뉴</h3>
+          <div class="btn-row">
+            <button id="startBtn" class="primary">게임 시작</button>
+            <button id="nextBtn">다음 라운드 ▶</button>
+            <button id="endBtn">라운드 종료</button>
+            <button id="newBoardBtn" class="danger">새 보드로 리셋</button>
+          </div>
+          <label class="inline">카운트다운
+            <select id="countdownSel">
+              <option value="30">30초</option>
+              <option value="60">60초</option>
+              <option value="90">90초</option>
+              <option value="120">120초</option>
+              <option value="180">180초</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="panel">
+          <h3>🏁 이번 라운드 기록</h3>
+          <ol id="bestList" class="list"></ol>
+          <button id="skipBtn" class="wide">건너뛰기 투표</button>
+        </div>
+
+        <div class="panel">
+          <h3>🏆 점수판</h3>
+          <ol id="scoreList" class="list"></ol>
+        </div>
+
+        <div class="panel chat">
+          <h3>💬 채팅</h3>
+          <div id="chatLog" class="chat-log"></div>
+          <form id="chatForm" class="chat-form">
+            <input id="chatInput" maxlength="200" placeholder="메시지 입력…" autocomplete="off" />
+            <button type="submit">전송</button>
+          </form>
+        </div>
+      </aside>
+    </main>
+  </section>
+
+  <div id="overlay" class="overlay hidden">
+    <div class="overlay-card" id="overlayCard"></div>
+  </div>
+  <div id="toast" class="toast"></div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="engine.js"></script>
+  <script src="client.js"></script>
+</body>
+</html>
