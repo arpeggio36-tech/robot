@@ -1,0 +1,17 @@
+{
+  "name": "ricochet-robots-online",
+  "version": "1.0.0",
+  "description": "리코셰 로봇(클래식) 온라인 멀티플레이 - 최대 30명",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "socket.io": "^4.8.1"
+  }
+}
