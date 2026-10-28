@@ -8,13 +8,24 @@ const http = require('http');
 const crypto = require('crypto');
 const express = require('express');
 const { Server } = require('socket.io');
+const fs = require('fs');
 const { Worker } = require('worker_threads');
-const E = require('./public/engine.js');
+
+// 정적 파일 위치 자동 감지: public/ 폴더가 없고 파일이 저장소 맨 바깥에 올라가 있어도 동작하게
+const PUBLIC_FILES = ['index.html', 'client.js', 'style.css', 'engine.js'];
+const PUBLIC_DIR = fs.existsSync(path.join(__dirname, 'public', 'engine.js')) ? path.join(__dirname, 'public') : __dirname;
+const missing = PUBLIC_FILES.filter((f) => !fs.existsSync(path.join(PUBLIC_DIR, f)));
+if (missing.length) {
+  console.error(`[오류] 다음 파일을 찾을 수 없습니다: ${missing.join(', ')}`);
+  console.error(`       public 폴더(또는 server.js와 같은 위치)에 ${PUBLIC_FILES.join(', ')} 4개 파일이 있어야 합니다.`);
+  console.error('       현재 폴더 내용:', fs.readdirSync(__dirname).join(', '));
+  process.exit(1);
+}
+const E = require(path.join(PUBLIC_DIR, 'engine.js'));
 
 const PORT = Number(process.env.PORT) || 3000;
 const MAX_PLAYERS = Number(process.env.MAX_PLAYERS) || 30;          // 방 하나당 최대 인원
 const DEFAULT_COUNTDOWN = Number(process.env.COUNTDOWN_SECONDS) || 60; // 첫 해답 이후 카운트다운(초)
-const REVEAL_SECONDS = Number(process.env.REVEAL_SECONDS) || 10;     // 결과 화면 유지(초)
 const SOLVER_TIME_MS = Number(process.env.SOLVER_TIME_MS) || 6000;   // 최적해 계산 시간 제한
 const GRACE_MS = 2 * 60 * 1000;      // 연결 끊긴 플레이어 점수 보존 시간
 const ROOM_IDLE_MS = 10 * 60 * 1000; // 빈 방 삭제까지 시간
@@ -22,7 +33,13 @@ const COUNTDOWN_OPTIONS = [30, 60, 90, 120, 180];
 
 const app = express();
 app.get('/healthz', (_req, res) => res.type('text').send('ok'));
-app.use(express.static(path.join(__dirname, 'public')));
+if (PUBLIC_DIR === __dirname) {
+  // 파일이 맨 바깥에 있는 경우: 게임 파일 4개만 공개 (server.js 등은 노출하지 않음)
+  app.get('/', (_req, res) => res.sendFile(path.join(PUBLIC_DIR, 'index.html')));
+  for (const f of PUBLIC_FILES) app.get('/' + f, (_req, res) => res.sendFile(path.join(PUBLIC_DIR, f)));
+} else {
+  app.use(express.static(PUBLIC_DIR));
+}
 
 const server = http.createServer(app);
 const io = new Server(server, {
@@ -134,18 +151,41 @@ function newBoard(room) {
   for (const p of room.players.values()) { p.score = 0; p.chips = []; }
 }
 
+// 이 목표를 로봇 1번 이동으로 풀 수 있는지 검사
+function isOneMove(room, target, robots) {
+  const idxs = target.color === 'any' ? [0, 1, 2, 3] : [E.COLORS.indexOf(target.color)];
+  for (const ri of idxs) {
+    for (const dir of E.DIR_KEYS) {
+      if (E.moveRobot(room.board.walls, robots, ri, dir) === target.pos) return true;
+    }
+  }
+  return false;
+}
+// 목표 위에 로봇이 있지도 않고, 1수로 풀리지도 않는 상태인가
+function isFairTarget(room, target, robots) {
+  return !robots.includes(target.pos) && !isOneMove(room, target, robots);
+}
+
 function startRound(room) {
   if (!rooms.has(room.code)) return;
   clearTimers(room);
   if (room.deck.length === 0) { room.phase = 'gameover'; broadcast(room); return; }
 
-  // 로봇이 이미 올라가 있지 않은 목표를 선택
-  let di = room.deck.findIndex((id) => !room.robots.includes(targetById(room, id).pos));
+  // 1) 로봇이 올라가 있지 않고 2) 1번 이동으로 풀리지 않는 목표를 우선 선택
+  let di = room.deck.findIndex((id) => isFairTarget(room, targetById(room, id), room.robots));
   if (di < 0) {
+    // 남은 목표가 전부 해당되면: 첫 목표를 고르고, 원인이 되는 로봇만 무작위 빈칸으로 옮김
     di = 0;
     const t = targetById(room, room.deck[0]);
-    const ri = room.robots.indexOf(t.pos);
-    room.robots[ri] = E.randomFreeCell(room.board.targets, room.robots);
+    for (let tries = 0; tries < 500 && !isFairTarget(room, t, room.robots); tries++) {
+      const idxs = t.color === 'any' ? [0, 1, 2, 3] : [E.COLORS.indexOf(t.color)];
+      let ri = room.robots.indexOf(t.pos);
+      if (ri < 0) {
+        ri = idxs.find((i) => E.DIR_KEYS.some((d) => E.moveRobot(room.board.walls, room.robots, i, d) === t.pos));
+        if (ri === undefined) ri = idxs[Math.floor(Math.random() * idxs.length)];
+      }
+      room.robots[ri] = E.randomFreeCell(room.board.targets, room.robots);
+    }
   }
   const tid = room.deck.splice(di, 1)[0];
   room.target = targetById(room, tid);
@@ -178,7 +218,7 @@ function runSolver(walls, robots, target) {
     const finish = (v) => { if (!done) { done = true; resolve(v); } };
     try {
       const w = new Worker(path.join(__dirname, 'solverWorker.js'), {
-        workerData: { walls, robots, target, timeLimitMs: SOLVER_TIME_MS },
+        workerData: { walls, robots, target, timeLimitMs: SOLVER_TIME_MS, enginePath: path.join(PUBLIC_DIR, 'engine.js') },
         resourceLimits: { maxOldGenerationSizeMb: 192 },
       });
       w.once('message', finish);
@@ -224,6 +264,7 @@ function endRound(room, reason) {
   } else {
     pushChat(room, null, `⏭ 라운드 ${r.num}: 해답 없이 넘어갑니다.`);
   }
+  if (room.deck.length > 0) pushChat(room, null, '👑 호스트가 [다음 라운드]를 누르면 다음 목표가 공개됩니다.');
   result.finalRobots = room.robots.slice();
   room.lastResult = result;
   room.phase = room.deck.length === 0 ? 'gameover' : 'reveal';
@@ -234,11 +275,8 @@ function endRound(room, reason) {
   }
 
   io.to(room.code).emit('roundResult', result);
-  if (room.phase === 'reveal') {
-    const delay = REVEAL_SECONDS * 1000 + (best ? best.count * 500 + 1200 : 0);
-    room.revealEndsAt = Date.now() + delay;
-    room.timers.next = setTimeout(() => startRound(room), delay);
-  }
+  // 다음 라운드는 자동으로 넘어가지 않고 호스트가 [다음 라운드] 버튼으로 진행
+  room.revealEndsAt = null;
   broadcast(room);
 }
 
@@ -313,7 +351,14 @@ io.on('connection', (socket) => {
 
     const prev = r.solutions.get(p.id);
     if (prev && prev.count <= res.count) return ack({ ok: true, improved: false, count: res.count, best: prev.count });
+    // 제출 직전까지의 방 전체 최고 기록
+    let roomBest = null;
+    for (const s of r.solutions.values()) if (roomBest === null || s.count < roomBest) roomBest = s.count;
     r.solutions.set(p.id, { count: res.count, moves: res.moves, time: now });
+
+    if (room.phase === 'countdown' && roomBest !== null && res.count < roomBest) {
+      pushChat(room, null, `⚡ ${p.name}님이 더 빠른 ${res.count}수 해답 발견! (기존 최고 ${roomBest}수)`);
+    }
 
     if (room.phase === 'playing') {
       room.phase = 'countdown';

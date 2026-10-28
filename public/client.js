@@ -466,7 +466,7 @@
         bar.textContent = '⏱ 카운트다운 중! 더 적은 수의 해답을 찾아보세요.';
         break;
       case 'reveal':
-        bar.textContent = '📣 라운드 결과 — 잠시 후 다음 라운드가 시작됩니다.';
+        bar.textContent = isHost() ? '📣 라운드 결과 — 준비되면 [다음 라운드 ▶]를 눌러 주세요.' : `📣 라운드 결과 — 호스트(${hostName})가 다음 라운드를 시작하길 기다리는 중…`;
         break;
       case 'gameover':
         bar.textContent = '🎉 게임 종료! 최종 순위를 확인하세요.';
@@ -488,9 +488,8 @@
       const sec = Math.max(0, Math.ceil((deadlineLocal - Date.now()) / 1000));
       t.textContent = `⏱ ${sec}초`;
       t.className = 'timer' + (sec <= 10 ? ' urgent' : '');
-    } else if (S.phase === 'reveal' && nextLocal) {
-      const sec = Math.max(0, Math.ceil((nextLocal - Date.now()) / 1000));
-      t.textContent = `다음 라운드까지 ${sec}초`;
+    } else if (S.phase === 'reveal') {
+      t.textContent = isHost() ? '다음 라운드 대기 (호스트)' : '호스트 대기 중';
       t.className = 'timer soft';
     } else if (S.phase === 'playing') {
       t.textContent = '해답 대기 중';

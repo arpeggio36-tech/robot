@@ -13,5 +13,3 @@ services:
         value: "30"
       - key: COUNTDOWN_SECONDS
         value: "60"
-      - key: REVEAL_SECONDS
-        value: "10"
